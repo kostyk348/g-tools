@@ -1,0 +1,16 @@
+# Build
+build/
+*.o
+*.so
+*.a
+
+# Benchmarks data (большие)
+benchmarks/data/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
