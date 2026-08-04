@@ -122,98 +122,80 @@ AnalyzeResult run_scan(const char* path, const char* const* patterns, int patter
     out.reserve(total / 16);
     size_t count = 0;
 
-    // SIMD-skip: 64-байтовые блоки
-    // Для каждого блока: проверяем, есть ли хоть один байт ∈ first_char_set.
-    // Используем printable_mask-подобный трюк: если множество ≤ 32,
-    // сравниваем блок с каждым байтом через AVX2 (32 байта за раз).
-    // Для простоты и корректности: делаем два 32-байтовых прохода.
+    // Уникальные первые байты — один раз
+    uint8_t uniq[256];
+    int n_uniq = 0;
+    if (sf.any) {
+        for (int b = 0; b < 256; ++b)
+            if (sf.fb[b]) uniq[n_uniq++] = static_cast<uint8_t>(b);
+    }
 
-    for (size_t pos = 0; pos + 64 <= total; pos += 64) {
-        // Быстрый отказ: ни один байт блока не ∈ first_char_set
-        // Проверяем через 2×AVX2 (или скаляр если мало уникальных)
+    // Один непрерывный прогон AC по файлу. SIMD-mask — только гейт:
+    // блок пропускается целиком, если в нём нет ни одного первого байта
+    // паттерна И автомат не в частичном совпадении (state == 0).
+    // ВАЖНО: state живёт между блоками — паттерн, начавшийся в блоке N,
+    // корректно завершается в блоке N+1 (пересечение границ не теряется).
+    int state = 0;
+    size_t pos = 0;
+    for (; pos + 64 <= total; pos += 64) {
         uint64_t mask = 0;
         if (sf.any) {
 #ifdef __AVX2__
-            // Собираем уникальные первые байты в массив
-            uint8_t uniq[256];
-            int n_uniq = 0;
-            for (int b = 0; b < 256; ++b)
-                if (sf.fb[b]) uniq[n_uniq++] = static_cast<uint8_t>(b);
-
-            // Первые 32
             const __m256i block0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(base + pos));
             for (int j = 0; j < std::min(32, n_uniq); ++j) {
                 const __m256i t = _mm256_set1_epi8(static_cast<char>(uniq[j]));
                 mask |= static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(block0, t)));
             }
-            // Вторые 32
-            if (n_uniq > 32 || (pos + 64 <= total)) {
-                const __m256i block1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(base + pos + 32));
-                int start = (n_uniq > 32) ? 32 : 0;
-                for (int j = start; j < n_uniq; ++j) {
-                    const __m256i t = _mm256_set1_epi8(static_cast<char>(uniq[j]));
-                    mask |= static_cast<uint32_t>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(block1, t))) << 32;
-                }
+            const __m256i block1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(base + pos + 32));
+            int start = (n_uniq > 32) ? 32 : 0;
+            for (int j = start; j < n_uniq; ++j) {
+                const __m256i t = _mm256_set1_epi8(static_cast<char>(uniq[j]));
+                mask |= static_cast<uint64_t>(static_cast<uint32_t>(
+                    _mm256_movemask_epi8(_mm256_cmpeq_epi8(block1, t)))) << 32;
             }
 #else
-            for (size_t i = 0; i < 64; ++i) {
+            for (size_t i = 0; i < 64; ++i)
                 if (sf.fb[base[pos + i]]) mask |= (1ull << i);
-            }
 #endif
         }
-        if (mask == 0) continue;
+        if (mask == 0 && state == 0) continue;
 
-        // Обрабатываем каждого кандидата
-        while (mask) {
-            int bit = __builtin_ctzll(mask);
-            mask &= mask - 1;
-
-            // AC-verify из root, начиная с base[pos + bit]
-            // Идём по байтам вперёд, отслеживая состояние AC
-            int state = 0;
-            for (size_t k = bit; k < 64 && (pos + k) < total; ++k) {
-                int c = base[pos + k];
-                while (ac.nodes[state].next[c] == -1 && state != 0)
-                    state = ac.nodes[state].fail;
-                if (ac.nodes[state].next[c] != -1)
-                    state = ac.nodes[state].next[c];
-
-                // Проверяем outputs на fail-цепочке
-                int u = state;
-                while (u != 0) {
-                    int o = ac.nodes[u].output;
-                    if (o == -1) break;
-                    int cur = o;
-                    while (cur != -1) {
-                        size_t plen = static_cast<size_t>(ac.pat_len[ac.output_pat[cur]]);
-                        uint64_t match_off = (pos + k >= plen - 1) ? (pos + k - (plen - 1)) : 0;
-                        g_scan_rec rec{match_off, static_cast<uint32_t>(ac.output_pat[cur]), 0};
-                        out.append(&rec, sizeof(rec));
-                        ++count;
-                        cur = ac.output_next[cur];
-                    }
-                    u = ac.nodes[u].fail;
+        for (size_t k = 0; k < 64; ++k) {
+            int c = base[pos + k];
+            while (ac.nodes[state].next[c] == -1 && state != 0)
+                state = ac.nodes[state].fail;
+            if (ac.nodes[state].next[c] != -1)
+                state = ac.nodes[state].next[c];
+            // Все outputs на fail-цепочке (не обрываемся на первом без output)
+            int u = state;
+            while (u != 0) {
+                int cur = ac.nodes[u].output;
+                while (cur != -1) {
+                    size_t plen = static_cast<size_t>(ac.pat_len[ac.output_pat[cur]]);
+                    uint64_t match_off = pos + k - (plen - 1);
+                    g_scan_rec rec{match_off, static_cast<uint32_t>(ac.output_pat[cur]), 0};
+                    out.append(&rec, sizeof(rec));
+                    ++count;
+                    cur = ac.output_next[cur];
                 }
+                u = ac.nodes[u].fail;
             }
         }
     }
 
-    // Хвост (< 64 байта): скалярно
-    for (size_t pos = (total / 64) * 64; pos < total; ++pos) {
+    // Хвост (< 64 байта): продолжаем то же состояние автомата
+    for (; pos < total; ++pos) {
         int c = base[pos];
-        int state = 0;
         while (ac.nodes[state].next[c] == -1 && state != 0)
             state = ac.nodes[state].fail;
         if (ac.nodes[state].next[c] != -1) state = ac.nodes[state].next[c];
 
         int u = state;
         while (u != 0) {
-            int o = ac.nodes[u].output;
-            if (o == -1) break;
-            int cur = o;
+            int cur = ac.nodes[u].output;
             while (cur != -1) {
                 size_t plen = static_cast<size_t>(ac.pat_len[ac.output_pat[cur]]);
-                uint64_t match_off = (pos >= plen - 1) ? (pos - (plen - 1)) : 0;
+                uint64_t match_off = pos - (plen - 1);
                 g_scan_rec rec{match_off, static_cast<uint32_t>(ac.output_pat[cur]), 0};
                 out.append(&rec, sizeof(rec));
                 ++count;
