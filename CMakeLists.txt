@@ -20,7 +20,8 @@ target_include_directories(gcore INTERFACE core/include)
 add_library(g-tools SHARED
   tools/g-grep/g_grep.cpp
   tools/g-strings/g_strings.cpp
-  tools/g-analyze/g_analyze.cpp)
+  tools/g-analyze/g_analyze.cpp
+  tools/g-scan/g_scan.cpp)
 target_link_libraries(g-tools PRIVATE gcore pthread)
 set_target_properties(g-tools PROPERTIES
   OUTPUT_NAME g-tools

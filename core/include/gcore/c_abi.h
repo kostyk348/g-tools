@@ -120,6 +120,32 @@ g_result g_diff(const char* path_a, const char* path_b, int block_size);
 /// Результат: data = декодированные байты.
 g_result g_xor(const char* path, uint64_t offset, uint64_t len, int key);
 
+// ===================== g_recon =====================
+// Одна mmap-сессия: hash + hist + entropy(64KB) + strings-семплы.
+// Результат — плоский буфер: [header][hist u64[256]][entropy recs][strings recs].
+// Python разбирает по заголовку.
+typedef struct g_recon_header {
+    uint64_t fnv1a64;
+    uint32_t crc32c;
+    uint32_t n_hist;      // 256
+    uint32_t n_entropy;
+    uint32_t n_strings;
+    uint32_t pad;
+} g_recon_header;
+
+g_result g_recon(const char* path, int entropy_block);
+
+// ===================== g_scan =====================
+// Мультипаттернный SIMD-скан (Aho-Corasick + skip по первым байтам).
+// Результат: g_scan_rec[] — {offset, pattern_idx} для каждого совпадения.
+typedef struct g_scan_rec {
+    uint64_t offset;
+    uint32_t pattern_idx;
+    uint32_t pad;
+} g_scan_rec;
+
+g_result g_scan(const char* path, const char* const* patterns, int pattern_count);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

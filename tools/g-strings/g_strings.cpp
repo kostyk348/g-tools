@@ -17,7 +17,7 @@
 using gcore::ChunkAllocator;
 using gcore::FlatArena;
 using gcore::MmapFile;
-using gcore::printable_mask;
+using gcore::printable_mask64;
 using gcore::shannon_entropy;
 
 extern "C" {
@@ -44,23 +44,23 @@ inline void emit_string(const uint8_t* base, size_t /*total*/, size_t start, siz
 
 void strings_worker(const uint8_t* base, size_t total, ChunkAllocator& alloc,
                     int min_len, double max_entropy, StringsOut& out) {
-    // Оценка: в худшем случае каждая 32-байтовая printable-строка даёт rec.
-    out.recs.reserve((total / 32 + 1) * 16 + 4096);
+// Оценка: в худшем случае каждая 64-байтовая printable-строка даёт rec.
+    out.recs.reserve((total / 64 + 1) * 16 + 4096);
 
     size_t begin = 0, end = 0;
     while (alloc.next(begin, end)) {
-        // Сканируем чанк блоками по 32 байта; бит i маски = байт printable.
+        // Сканируем чанк блоками по 64 байта; бит i маски = байт printable.
+        // AVX-512: 64 байта за такт (printable_mask64); иначе 2×AVX2/скаляр.
         // Строка = максимальный прогон printable битов длиной >= min_len.
         bool in_string = false;
         size_t run_start = 0;
         size_t i = begin;
-        for (; i + 32 <= end; i += 32) {
-            const uint32_t m = printable_mask(base + i);
-            // Пробегаем 32 бита
-            uint32_t bits = m;
+        for (; i + 64 <= end; i += 64) {
+            const uint64_t m = printable_mask64(base + i);
+            uint64_t bits = m;
             int b = 0;
-            while (b < 32) {
-                if (bits & 0x1u) {
+            while (b < 64) {
+                if (bits & 0x1ull) {
                     if (!in_string) { in_string = true; run_start = i + b; }
                 } else {
                     if (in_string) {
@@ -68,11 +68,11 @@ void strings_worker(const uint8_t* base, size_t total, ChunkAllocator& alloc,
                         in_string = false;
                     }
                 }
-                bits >>= 1u;
+                bits >>= 1ull;
                 ++b;
             }
         }
-        // Хвост чанка (< 32 байт): скалярно
+        // Хвост чанка (< 64 байта): скалярно
         for (; i < end; ++i) {
             const uint8_t c = base[i];
             const bool is_p = (c >= 0x20 && c <= 0x7E);

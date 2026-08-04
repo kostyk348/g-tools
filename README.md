@@ -2,7 +2,8 @@
 
 Монорепо на базе архитектуры **g-proto / g-core** (см. спеку): замена
 POSIX I/O + скалярного парсинга на dataflow DAG над единой mmap-памятью
-с SIMD (AVX2) и lock-free синхронизацией.
+с SIMD (AVX2 + AVX-512, runtime-диспатч по `cpu_has_avx512()`) и lock-free
+синхронизацией.
 
 ## Конвейер (каждая утилита — граф нод)
 
@@ -66,10 +67,10 @@ python3 -c "from bindings.python.g_grep import grep; print(len(grep('/tmp/g_benc
 |---|---|---|
 | **g-grep** | ✅ готов | mmap + lock-free chunks + SIMD scan |
 | **g-strings** | ✅ готов | printable-строки с офсетами + энтропийный фильтр, выход в numpy |
-| **g-analyze** | ✅ готов | ноды RE-разведки: entropy_profile, bytes, hash, hist, unicode, sections, diff, xor |
+| **g-analyze** | ✅ готов | ноды RE-разведки: entropy_profile, bytes, hash, hist, unicode, sections, diff, xor, recon |
+| **g-scan** | ✅ готов | YARA-подобный SIMD-скан сигнатур (Aho-Corasick + SIMD-skip) |
 | **g-sort** | ⏳ план | SIMD-сортировка чанков + k-way merge в арену |
 | **g-query** | ⏳ план | SQL-ноды над CSV/JSON без импорта (флагман) |
-| **g-scan** | ⏳ план | YARA-подобный SIMD-скан сигнатур, композиция шаблонов |
 | **g-bus** | ⏳ план | mmap ring-buffer IPC, мост Python ↔ C++ (<2ns) |
 | **g-dedup** | ⏳ план | хэш-дедуп через mmap + bloom |
 | **g-pcap** | ⏳ план | потоковый анализатор пакетов (поля заголовков как разделители) |
@@ -117,8 +118,16 @@ VFS-образы) отрыв растёт: GNU strings однопоточный 
 | `g_sections` | path | `{offset, size, entropy, name, type}[]` | ELF/PE-разведка секций |
 | `g_diff` | path_a, path_b, block | `{offset_a, offset_b, len, status}[]` | блочное сравнение версий/патчей |
 | `g_xor` | path, offset, len, key | декодированные байты | XOR-обфускация (floss-стиль) |
+| `g_recon` | path | карта файла целиком | hash + hist + entropy-регионы + строки-семплы одним проходом |
 
 Ключевые детали:
+- `g_strings`/`g_unicode`: воркеры на **64-байтовых блоках** с AVX-512
+  (`printable_mask64`/`zero_mask64`, uint64-маски) — при `-march=native` на Zen 4
+  включаются zmm-примитивы автоматически, runtime-диспатч для не-AVX512 CPU.
+- `g_recon`: полная RE-карта файла за один mmap-проход — FNV-1a 64 + CRC32C
+  (SSE4.2), байтовая гистограмма u64[256], энтропийная сегментация по блокам
+  ≥4096, до 2000 строк-семплов. Выход — плоский буфер
+  `[header][hist][entropy][strings]`.
 - `g_unicode`: SIMD-скан по **парам** с двумя сдвигами (чёт/нечёт) — UTF-16 строки
   с нечётным стартом не теряются; 33-й байт для пары (i+31, i+32) берётся из
   `zero_mask(base+i+1) << 1` в uint64 (иначе прогон рвётся на каждом блоке).
@@ -134,14 +143,31 @@ python3 tests/test_extra_nodes.py   # тесты всех 8 нод: hash, hist, 
 
 Все ноды доступны как MCP-инструменты (см. ниже).
 
+## g-scan — мультипаттернный SIMD-скан сигнатур
+
+`tools/g-scan/g_scan.cpp`: YARA-подобный поиск до 1000 паттернов за один проход.
+
+- **Aho-Corasick** над паттернами — линейное время поиска всех паттернов сразу.
+- **SIMD-skip**: перед прогоном AC первые байты паттернов сверяются 64-байтовым
+  AVX2/AVX-512 маскам (`count_byte`/`find_byte`), тупые области файла
+  пропускаются векторно.
+- Выход — flat-массив `{offset, pattern_idx}` (16 байт), Python дешифрует в
+  numpy без копий.
+
+```bash
+python3 tests/test_scan.py  # поиск magic/сигнатур
+```
+
 ## MCP-сервер g-tools
 
 `/home/lain/.opencode/mcp/g-tools/server.py` — FastMCP поверх libg-tools.so,
-зарегистрирован в opencode.json. 10 инструментов:
+зарегистрирован в opencode.json. 12 инструментов:
 
 `g_strings`, `g_unicode`, `g_entropy_profile`, `g_grep_lines`, `g_bytes`,
-`g_hash`, `g_hist`, `g_sections`, `g_diff`, `g_xor`
+`g_hash`, `g_hist`, `g_sections`, `g_diff`, `g_xor`, `g_recon`, `g_scan`
 
-RE-разведка за один запрос к нейронке: `g_entropy_profile` → карта регионов →
+RE-разведка за один запрос к нейронке: `g_recon` → полная карта файла
+(hash + hist + entropy-регионы + строки) одним вызовом, затем
 `g_bytes`/`g_strings` в интересных офсетах → `g_sections` для ELF/PE →
-`g_xor` если строки зашифрованы. (Принцип «сначала карта за 300ms, потом точечный анализ».)
+`g_scan` для поиска сигнатур → `g_xor` если строки зашифрованы.
+(Принцип «сначала карта за 300ms, потом точечный анализ».)
