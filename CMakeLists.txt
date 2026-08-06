@@ -16,6 +16,17 @@ add_compile_options(-O3 -march=native -mavx2 -mfma -ffast-math -pthread
 add_library(gcore INTERFACE)
 target_include_directories(gcore INTERFACE core/include)
 
+# ===================== g-runtime: shim-слой (LD_PRELOAD) =====================
+add_library(g_io SHARED runtime/src/g_io_posix.cpp)
+target_include_directories(g_io PRIVATE runtime/include)
+target_link_libraries(g_io PRIVATE gcore dl pthread)
+set_target_properties(g_io PROPERTIES
+  OUTPUT_NAME g_io
+  POSITION_INDEPENDENT_CODE ON)
+
+add_executable(g-io-demo runtime/demo/g_io_demo.cpp)
+target_link_libraries(g-io-demo PRIVATE gcore)
+
 # ===================== g-grep: shared lib (C-ABI) =====================
 add_library(g-tools SHARED
   tools/g-grep/g_grep.cpp

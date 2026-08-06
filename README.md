@@ -171,3 +171,42 @@ RE-разведка за один запрос к нейронке: `g_recon` �
 `g_bytes`/`g_strings` в интересных офсетах → `g_sections` для ELF/PE →
 `g_scan` для поиска сигнатур → `g_xor` если строки зашифрованы.
 (Принцип «сначала карта за 300ms, потом точечный анализ».)
+
+## g-runtime: shim-слой для старых бинарников (LD_PRELOAD)
+
+`runtime/` — портируемый слой между старым бинарником (PC/PS2) и новым
+хостом (Linux/Vita). Два уровня:
+
+- **Уровень A** (`runtime/src/g_io_posix.cpp`): LD_PRELOAD-хуки
+  `open/open64/openat/read/pread/read64/lseek/lseek64/close/fstat/fstat64/
+  fcntl/mmap/munmap/posix_fadvise/ioctl/fdopen` → файл читается через
+  `gcore::MmapFile` (mmap, MAP_POPULATE) и отдаётся программе как fake fd
+  (>= 0x6000). Повторные чтения — memcpy из RAM, ноль syscalls.
+- **Уровень B** (`runtime/include/grt/g_runtime.hpp`): VFS-нормализация путей
+  (C:\ → /ux0:data/), mmap-слайс-кэш, fake-fd таблица. Линкуется напрямую
+  в Vita/PS2-проекты (eboot), без dlsym.
+
+Ключевые решения, выстраданные на coreutils:
+
+- **raw syscalls в gcore** (`GCORE_RAW_SYSCALL`): gcore::MmapFile::open идёт
+  через `syscall(SYS_openat/SYS_mmap/...)`, минуя собственные хуки shim —
+  иначе бесконечная рекурсия и двойной mmap.
+- **`__read_chk`** (fortify-вариант read): wc/grep собираются с
+  `_FORTIFY_SOURCE` и зовут его вместо `read` — без хука EBADF.
+- **`st_dev/st_ino` в fake fd**: grep/cp сравнивают (dev,ino) файлов между
+  собой; нули ломали "input == output" и "replaced while copied" проверки.
+- **`fopencookie` для fdopen**: glibc stdio внутри вызывает не-интерпозируемый
+  `fcntl(fd,F_GETFL)` — fake fd ему не подходит, поэтому fdopen поверх fake
+  fd создаёт FILE* через fopencookie, читающий прямо из mmap-слайса.
+- **`posix_fadvise`/`ioctl(FIONREAD)`** возвращают no-op для fake fd
+  (файл уже в RAM — совет не нужен).
+
+```bash
+LD_PRELOAD=./build/libg_io.so cat big_file          # read из RAM
+GIO_STATS=1 LD_PRELOAD=./build/libg_io.so wc -w f   # статистика mmap
+./runtime/test_coreutils.sh      # 21/21 coreutils под shim
+./runtime/test_coreutils_ext.sh  # +11 текстовых/хешей/поиска
+```
+
+Проверено: cat/head/tail/wc/sort/grep/sed/awk/cp/md5sum/sha256sum на файлах
+до 474MB — вывод побайтово идентичен без shim.
