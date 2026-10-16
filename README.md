@@ -1,5 +1,8 @@
 # g-tools — Zero-Copy Dataflow DAG Engine экосистема
 
+[![Release](https://img.shields.io/github/v/release/kostyk348/g-tools?sort=semver&color=blue)](https://github.com/kostyk348/g-tools/releases)
+[![Last commit](https://img.shields.io/github/last-commit/kostyk348/g-tools?branch=main)](https://github.com/kostyk348/g-tools/commits/main)
+
 Монорепо на базе архитектуры **g-proto / g-core** (см. спеку): замена
 POSIX I/O + скалярного парсинга на dataflow DAG над единой mmap-памятью
 с SIMD (AVX2 + AVX-512, runtime-диспатч по `cpu_has_avx512()`) и lock-free
