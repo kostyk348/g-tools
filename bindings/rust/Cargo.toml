@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["gcore-sys", "gcore"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/kostyk348/g-tools"
+rust-version = "1.75"

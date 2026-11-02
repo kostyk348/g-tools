@@ -76,7 +76,8 @@ g_result g_unicode(const char* path, int min_len, double max_entropy);
 
 /// Хэши файла для идентификации/дедупа. count=1.
 typedef struct g_hash_rec {
-    uint64_t fnv1a64;   ///< FNV-1a 64 (полный файл)
+    uint64_t fnv1a64;   ///< FNV-1a 64 по u64-словам (LE), побайтовый хвост (n%%8).
+                        ///  ВНИМАНИЕ: не эквивалентен побайтовому FNV-1a.
     uint32_t crc32c;    ///< CRC32C (SSE4.2 hardware)
 } g_hash_rec;
 
@@ -125,6 +126,7 @@ g_result g_xor(const char* path, uint64_t offset, uint64_t len, int key);
 // Результат — плоский буфер: [header][hist u64[256]][entropy recs][strings recs].
 // Python разбирает по заголовку.
 typedef struct g_recon_header {
+    /// Побайтовый FNV-1a (в g_hash — словный по u64; значения НЕ совпадают).
     uint64_t fnv1a64;
     uint32_t crc32c;
     uint32_t n_hist;      // 256

@@ -55,5 +55,23 @@ add_executable(test_strings tests/test_strings.cpp)
 target_link_libraries(test_strings PRIVATE g-tools gcore pthread)
 add_test(NAME test_strings COMMAND test_strings)
 
+# Расширенные C-ABI ноды: hash/hist/entropy/bytes/xor/sections/diff/scan/recon
+add_executable(test_analyze tests/test_analyze.cpp)
+target_link_libraries(test_analyze PRIVATE g-tools gcore pthread)
+add_test(NAME test_analyze COMMAND test_analyze)
+
+# Детерминированный API-фаззер: случайные (валидные) входы + инварианты ABI
+add_executable(fuzz_api tests/fuzz_api.cpp)
+target_link_libraries(fuzz_api PRIVATE g-tools gcore pthread)
+add_test(NAME fuzz_api COMMAND fuzz_api)
+
+# ctypes-тест (герметичный): python3 tests/test_extra_nodes.py <libg-tools.so>
+find_program(PYTHON3_EXECUTABLE NAMES python3 python)
+if (PYTHON3_EXECUTABLE)
+  add_test(NAME test_extra_nodes
+           COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_extra_nodes.py
+                   $<TARGET_FILE:g-tools>)
+endif()
+
 # ===================== бенчмарк-генератор =====================
 add_executable(gen_data benchmarks/gen_data.cpp)

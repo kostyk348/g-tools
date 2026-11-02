@@ -1,12 +1,77 @@
 name: CI
+
 on:
   push:
+    branches: [main, master]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-test:
+    name: build + ctest (ubuntu)
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure (Release)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
       - name: Build
+        run: cmake --build build -j
+
+      - name: ctest
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke: README quickstart
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+          ./build/gen_data 2000000 /tmp/g_bench.csv
+          ./build/g-grep -c row /tmp/g_bench.csv
+          grep -c row /tmp/g_bench.csv
+          python3 -c "from bindings.python.g_grep import grep; print(len(grep('/tmp/g_bench.csv','row1')) > 0)"
+
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (Debug + sanitizers)
+        run: |
+          cmake -B build-san -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build-san -j
+
+      - name: ctest (sanitized)
+        run: ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-san --output-on-failure
+
+  rust-bindings:
+    name: Rust bindings (gcore)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bindings/rust
+
+      - name: Test (builds libg-tools via cmake in build.rs)
+        run: cargo test --manifest-path bindings/rust/Cargo.toml
+
+      - name: Clippy
+        run: cargo clippy --manifest-path bindings/rust/Cargo.toml --all-targets -- -D warnings
+
+      - name: Format
+        run: cargo fmt --manifest-path bindings/rust/Cargo.toml --check
