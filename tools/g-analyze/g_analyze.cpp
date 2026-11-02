@@ -77,6 +77,15 @@ AnalyzeResult run_entropy_profile(const char* path, int block_size, unsigned nth
     for (const auto& a : arenas) bytes += a.size();
     if (!r.arena.reserve(bytes)) return r;
     for (const auto& a : arenas) if (a.size()) r.arena.append(a.data(), a.size());
+    // Воркеры пишут стридами (i, i+n, ...) в свои арены — после склейки
+    // сортируем по offset, как run_unicode: контракт ABI — возрастание offset.
+    if (r.arena.size()) {
+        auto* recs = reinterpret_cast<EntropyRec*>(r.arena.data());
+        const size_t cnt = r.arena.size() / sizeof(EntropyRec);
+        std::sort(recs, recs + cnt, [](const EntropyRec& a, const EntropyRec& b) {
+            return a.offset < b.offset;
+        });
+    }
     r.count = bytes / sizeof(EntropyRec);
     r.ok = true;
     return r;
@@ -196,7 +205,7 @@ inline void emit_u16(U16Out& out, const uint8_t* base, size_t start, size_t epos
     ++out.count;
 }
 
-void unicode_worker(const uint8_t* base, size_t /*total*/, ChunkAllocator& alloc,
+void unicode_worker(const uint8_t* base, size_t total, ChunkAllocator& alloc,
                     int min_len, double max_entropy, U16Out& out) {
     size_t begin = 0, end = 0;
     while (alloc.next(begin, end)) {
@@ -250,8 +259,16 @@ void unicode_worker(const uint8_t* base, size_t /*total*/, ChunkAllocator& alloc
                 else        { if (in0) { emit_u16(out, base, rs0, i, min_len, max_entropy); in0 = false; } }
             }
         }
-        if (in0) in0 = false;  // строка обрезана границей чанка (редкий случай)
-        if (in1) in1 = false;
+        // Конец файла — настоящий конец строки: добираем (EOF-раны раньше
+        // терялись). Внутренняя граница чанка режет произвольно — discard.
+        if (in0) {
+            if (end == total) emit_u16(out, base, rs0, end, min_len, max_entropy);
+            in0 = false;
+        }
+        if (in1) {
+            if (end == total) emit_u16(out, base, rs1, end, min_len, max_entropy);
+            in1 = false;
+        }
     }
 }
 

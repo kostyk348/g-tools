@@ -1,6 +1,10 @@
 # g-tools — Zero-Copy Dataflow DAG Engine экосистема
 
 [![Release](https://img.shields.io/github/v/release/kostyk348/g-tools?sort=semver&color=blue)](https://github.com/kostyk348/g-tools/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/kostyk348/g-tools/ci.yml?branch=main&label=CI)](https://github.com/kostyk348/g-tools/actions/workflows/ci.yml)
+[![tests](https://img.shields.io/badge/ctest-5%20suites%20%2B%20API%20fuzz-22c55e)](#структура)
+[![Rust bindings](https://img.shields.io/badge/Rust-gcore%20bindings-orange)](bindings/rust/README.md)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![Last commit](https://img.shields.io/github/last-commit/kostyk348/g-tools?branch=main)](https://github.com/kostyk348/g-tools/commits/main)
 
 Монорепо на базе архитектуры **g-proto / g-core** (см. спеку): замена
@@ -32,13 +36,20 @@ tests/                 юнит-тесты инвариантов
 benchmarks/            генератор CSV + скрипты сравнения
 ```
 
-## Сборка
+## Сборка и тесты
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-ctest --test-dir build          # тесты инвариантов
+ctest --test-dir build --output-on-failure   # 5 наборов: core, strings,
+                                             # analyze (13 C-ABI нод), API-fuzz,
+                                             # ctypes (герметичные фикстуры)
+cargo test --manifest-path bindings/rust/Cargo.toml  # Rust-биндинги
 ```
+
+Детерминированный API-фаззер (`fuzz_api`) проверяет контракты узлов против
+reference-реализаций на случайных входах; в CI крутится 3000 итераций + ASan/UBSan
+прогон всех тестов.
 
 ## Быстрый старт
 
@@ -64,6 +75,28 @@ python3 -c "from bindings.python.g_grep import grep; print(len(grep('/tmp/g_benc
   (иначе своппинг убивает производительность).
 - Результаты воспроизводимы: `./build/gen_data N` + сравнение на одном файле.
 
+## Языки: C++ ядро + Rust-биндинги
+
+Ядро остаётся **C++** — и это осознанное решение, а не инерция. Ценность g-tools
+в ручных AVX-512 интринсиках, mmap-тюнинге (`MAP_POPULATE` по свободной RAM) и
+lock-free чанках; переписывание на Rust дало бы те же `unsafe` + `std::arch`
+в другом синтаксисе, без выигрыша в безопасности и с риском потерять бенчмарки
+(7.7x против GNU grep). Межъязыковая граница уже существует — **C ABI**, и в
+обе стороны: Python ходит через ctypes, Rust — через официальные биндинги:
+
+```bash
+cargo test --manifest-path bindings/rust/Cargo.toml   # gcore-sys + gcore
+```
+
+```rust
+use gcore::{grep_count, scan, strings};
+let n = grep_count("/tmp/big.csv", "row1").unwrap_or(0);
+let sigs = scan("/tmp/firmware.bin", &["MZ", "PK\x03\x04"]);
+let printable = strings("/tmp/firmware.bin", 6, None);
+```
+
+Подробности и контракты ABI — [bindings/rust/README.md](bindings/rust/README.md).
+
 ## Экосистема (дорожная карта)
 
 | Инструмент | Статус | Описание |
@@ -77,6 +110,7 @@ python3 -c "from bindings.python.g_grep import grep; print(len(grep('/tmp/g_benc
 | **g-bus** | ⏳ план | mmap ring-buffer IPC, мост Python ↔ C++ (<2ns) |
 | **g-dedup** | ⏳ план | хэш-дедуп через mmap + bloom |
 | **g-pcap** | ⏳ план | потоковый анализатор пакетов (поля заголовков как разделители) |
+| **gcore (Rust)** | ✅ готов | безопасные биндинги ко всем C-ABI нодам (`bindings/rust`) |
 
 ## g-strings (для RE / нейронки)
 
