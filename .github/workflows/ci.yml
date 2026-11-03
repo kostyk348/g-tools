@@ -32,9 +32,9 @@ jobs:
       - name: "Smoke: README quickstart"
         run: |
           ./build/gen_data 2000000 /tmp/g_bench.csv
-          ./build/g-grep -c row /tmp/g_bench.csv
-          grep -c row /tmp/g_bench.csv
-          python3 -c "from bindings.python.g_grep import grep; print(len(grep('/tmp/g_bench.csv','row1')) > 0)"
+          ./build/g-grep -c NEEDLE /tmp/g_bench.csv
+          grep -c NEEDLE /tmp/g_bench.csv
+          python3 -c "from bindings.python.g_grep import grep; print(len(grep('/tmp/g_bench.csv','NEEDLE_RECORD_1')) > 0)"
 
   sanitizers:
     name: ASan + UBSan
