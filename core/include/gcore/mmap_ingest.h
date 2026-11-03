@@ -71,12 +71,24 @@ public:
         int flags = MAP_SHARED;
         if (static_cast<uint64_t>(size_) <= avail_bytes / 2) flags |= MAP_POPULATE;
 
+        // RAW-сисколл возвращает -errno при ошибке (НЕ MAP_FAILED == -1) — если
+        // это не различать, провал mmap становится «валидным» указателем вида
+        // 0xFFFF... и дальше SEGV по high address. Плюс MAP_POPULATE может
+        // транзиенто упасть по памяти: ретраим без prefault — он оптимальзация,
+        // а не требование.
+        auto raw_mmap = [&](int fl) -> void* {
 #ifdef GCORE_RAW_SYSCALL
-        void* m = reinterpret_cast<void*>(::syscall(SYS_mmap, nullptr, size_, PROT_READ,
-                                                    flags, fd_, 0));
+            const long r = ::syscall(SYS_mmap, nullptr, size_, PROT_READ, fl, fd_, 0);
+            return r < 0 ? MAP_FAILED : reinterpret_cast<void*>(r);
 #else
-        void* m = ::mmap(nullptr, size_, PROT_READ, flags, fd_, 0);
+            return ::mmap(nullptr, size_, PROT_READ, fl, fd_, 0);
 #endif
+        };
+        void* m = raw_mmap(flags);
+        if (m == MAP_FAILED && (flags & MAP_POPULATE)) {
+            flags &= ~MAP_POPULATE;
+            m = raw_mmap(flags);
+        }
         if (m == MAP_FAILED) {
             ::close(fd_); fd_ = -1;
             size_ = 0;
