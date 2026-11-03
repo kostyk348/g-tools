@@ -29,7 +29,7 @@ jobs:
       - name: ctest
         run: ctest --test-dir build --output-on-failure
 
-      - name: Smoke: README quickstart
+      - name: "Smoke: README quickstart"
         run: |
           ./build/gen_data 2000000 /tmp/g_bench.csv
           ./build/g-grep -c row /tmp/g_bench.csv
@@ -53,7 +53,10 @@ jobs:
         run: cmake --build build-san -j
 
       - name: ctest (sanitized)
-        run: ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-san --output-on-failure
+        # test_extra_nodes — это python-ctypes процесс: ASan-рантайм в него
+        # не предзагружен, инструментированная .so детонирует на старте.
+        # Инварианты питоновского теста и так покрыты C-тестами в этой джобе.
+        run: ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-san --output-on-failure -E test_extra_nodes
 
   rust-bindings:
     name: Rust bindings (gcore)
@@ -74,4 +77,4 @@ jobs:
         run: cargo clippy --manifest-path bindings/rust/Cargo.toml --all-targets -- -D warnings
 
       - name: Format
-        run: cargo fmt --manifest-path bindings/rust/Cargo.toml --check
+        run: cargo fmt --all --manifest-path bindings/rust/Cargo.toml --check
