@@ -37,6 +37,9 @@ public:
     /// Гарантирует capacity байт. Не трогает уже записанные данные.
     bool reserve(size_t capacity) noexcept {
         if (capacity <= capacity_) return true;
+        // C11: aligned_alloc требует size, кратный alignment (glibc прощает,
+        // ASan/UBSan — нет). Округляем вверх до 64.
+        capacity = (capacity + 63) & ~size_t(63);
         void* m = std::aligned_alloc(64, capacity);
         if (!m) return false;
         if (mem_) std::memcpy(m, mem_, size_);
