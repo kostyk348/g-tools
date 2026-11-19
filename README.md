@@ -86,6 +86,12 @@ Notes:
 - `MAP_POPULATE` is enabled automatically only when the file is ≤ half of free
   RAM (otherwise swapping kills performance).
 - Results are reproducible: `./build/gen_data N` + comparison on the same file.
+- **The speedup is scale-dependent.** The same command over 2M records (119 MB,
+  fully page-cached) measures the other way round: `grep` 1–2 ms vs `g-grep`
+  30–46 ms (0.03–0.05x), measured on the `benchmark` CI job of 2026-11-19. With
+  no I/O to amortise and a file that fits in the CPU cache, the win does not
+  exist — the 7.7x above is the 1.8 GB / memory-bound case. The CI job prints its
+  own numbers rather than asserting a speedup.
 
 ## Languages: C++ core + Rust bindings
 
