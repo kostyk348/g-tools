@@ -84,7 +84,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Configure + build
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+      - name: Configure + build (native ISA for the benchmark)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DGTOOLS_NATIVE=ON && cmake --build build -j
       - name: Compare
         run: bash benchmarks/compare.sh 2000000 NEEDLE_RECORD_1

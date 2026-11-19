@@ -8,9 +8,17 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Флаги ядра по спеке g-proto: -O3 -march=native -mavx2 -mfma -ffast-math -pthread
-add_compile_options(-O3 -march=native -mavx2 -mfma -ffast-math -pthread
-                    -Wall -Wextra)
+# Флаги ядра по спеке g-proto: -O3 -mavx2 -mfma -ffast-math -pthread.
+# -march=native включается только явно (GTOOLS_NATIVE=ON): он делает бинарник
+# привязанным к CPU сборочной машины, а в связке с ASan-инструментацией на
+# AVX-512 Xeon (GCC 13) роняет test_analyze в SEGV — воспроизведено 8/8 падений
+# с -march=native против 0/8 с закреплённым -mavx2 -mfma.
+option(GTOOLS_NATIVE "Build with -march=native (CPU-specific, benchmarks only)" OFF)
+if(GTOOLS_NATIVE)
+  add_compile_options(-march=native -mavx2 -mfma -O3 -ffast-math -pthread -Wall -Wextra)
+else()
+  add_compile_options(-mavx2 -mfma -O3 -ffast-math -pthread -Wall -Wextra)
+endif()
 
 # ===================== gcore: header-only ядро =====================
 add_library(gcore INTERFACE)
