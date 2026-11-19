@@ -19,7 +19,8 @@ mmap, lock-free chunks), Rust получает плоскую арену чер�
 ## Сборка
 
 `build.rs` вызывает cmake и собирает `libg-tools` (нужны cmake >= 3.20 и
-C++20-компилятор; ядро собирается с `-march=native`, поэтому хост x86-64 с AVX2):
+C++20-компилятор; ядро собирается с `-mavx2 -mfma` — нужен хост x86-64 с AVX2;
+`-DGTOOLS_NATIVE=ON` включает нативные расширения, вплоть до AVX-512 zmm):
 
 ```bash
 cargo test --manifest-path bindings/rust/Cargo.toml

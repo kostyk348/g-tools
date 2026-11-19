@@ -172,9 +172,10 @@ pipeline (mmap → chunks → SIMD → arena → C-ABI):
 
 Key details:
 - `g_strings`/`g_unicode`: workers over **64-byte blocks** with AVX-512
-  (`printable_mask64`/`zero_mask64`, uint64 masks) — with `-march=native` on
-  Zen 4 the zmm primitives switch on automatically, with runtime dispatch for
-  non-AVX512 CPUs.
+  (`printable_mask64`/`zero_mask64`, uint64 masks) — with `-DGTOOLS_NATIVE=ON`
+  on Zen 4 / Sapphire Rapids the zmm primitives switch on automatically, with
+  runtime dispatch for non-AVX512 CPUs. The default build targets AVX2 + FMA
+  (`-mavx2 -mfma`), so the shipped binary runs on any x86-64-v3 host.
 - `g_recon`: a full RE map of the file in one mmap pass — FNV-1a 64 + CRC32C
   (SSE4.2), a u64[256] byte histogram, block entropy segmentation (≥4096), up
   to 2000 string samples. Output is a flat buffer
