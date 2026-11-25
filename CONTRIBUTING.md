@@ -39,3 +39,10 @@ cargo test --manifest-path bindings/rust/Cargo.toml # Rust-биндинги (н�
 
 Маленькие, одноцелевые PR, заголовок conventional commits (`feat:`, `fix:`,
 `perf:`, `docs:`, `ci:`). В описании — цифры до/после для perf-изменений.
+
+Описание PR собирается из шаблона
+[`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)
+(подхватывается GitHub автоматически), баги удобнее заводить по
+[`.github/ISSUE_TEMPLATE/bug.md`](.github/ISSUE_TEMPLATE/bug.md).
+Формат файлов задан [`.editorconfig`](.editorconfig) — EditorConfig-расширения
+подхватывают его без настройки.
